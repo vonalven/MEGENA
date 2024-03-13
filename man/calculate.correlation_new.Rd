@@ -8,9 +8,16 @@ correlation calculation
 correlation analysis with FDR calculation. This is an adapted version of the original calculate.correlation function, that is orders of magnitude faster for the correlation calculation without permutations. The permutation-based approach to compute correlation pValues was redesigned to determine significance by genes instead of determining a global FDR threshold. Please notice that for the permutation approach, the more permutations, the better the estimation of the empirical pValue.
 }
 \usage{
-calculate.correlation(datExpr,doPerm = 100,num.cores = 8,method = "pearson",
-FDR.cutoff = 0.05,is.signed = FALSE,
-output.permFDR = TRUE,output.corTable = TRUE,saveto = NULL)
+calculate.correlation_new(datExpr,
+                          doPerm          = 100,
+                          num.cores       = 8,
+                          method          = "pearson",
+                          use.obs         = "na.or.complete",
+                          FDR.cutoff      = 0.05,
+                          is.signed       = FALSE,
+                          output.permFDR  = TRUE,
+                          output.corTable = TRUE,
+                          saveto          = NULL)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
