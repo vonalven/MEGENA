@@ -349,4 +349,171 @@ calculate.correlation <- function(datExpr,doPerm = 100,doPar = FALSE,num.cores =
  return(edgelist)
 }
 
+
+
+calculate.correlation_new <- function(datExpr,
+                                      doPerm          = 100,
+                                      doPar           = FALSE,
+                                      num.cores       = 8,
+                                      method          = "pearson",
+                                      use.obs         = "na.or.complete",
+                                      FDR.cutoff      = 0.05,
+                                      n.increment     = 100,
+                                      is.signed       = FALSE,
+                                      output.permFDR  = TRUE,
+                                      output.corTable = TRUE,
+                                      saveto          = NULL){
+  
+  # Input
+  # datExpr = expression matrix (row = probe,column = sample)
+  # doPerm = number of permutations
+  # num.cores = number of cores to call when parallel computing 
+  # FDR.cutoff = FDR cut-off
+  # n.increment = number of increments to segment (rho_min,rho_max).
+  # is.signed = FALSE (unsigned correlation), TRUE (signed correlation)
+  # output.permFDR = TRUE (output permutation indices into .txt file)
+  # output.corTable = TRUE (output final correlation into .txt file)
+  # saveto = designated save folder
+  
+  if(doPerm == 0){
+    
+    cor.output                             <- WGCNA::corAndPvalue(x = t(datExpr), use = use.obs, alternative = "two.sided", method = method)
+    cor.df                                 <- cor.output$cor
+    cor.df[upper.tri(cor.df, diag = T)]    <- NA
+    cor.df                                 <- reshape2::melt(cor.df)
+    pval.df                                <- cor.output$p
+    pval.df[upper.tri(pval.df, diag = T)]  <- NA
+    pval.df                                <- reshape2::melt(pval.df)
+    colnames(cor.df)                       <- c("col", "row", "rho")
+    colnames(pval.df)                      <- c("col", "row", "p.value")
+    # match rows instead of merging - faster
+    stopifnot(identical(cor.df$row, pval.df$row) & identical(cor.df$col, pval.df$col))
+    
+    edgelist             <- type.convert(as.data.frame(cbind(cor.df, pval.df[, -c(1:2), drop = F])), as.is = T)
+    edgelist             <- edgelist[!is.na(edgelist$rho), ]
+    # edgelist             <- edgelist[edgelist$row != edgelist$col, ]
+    edgelist$fdr.q.value <- p.adjust(edgelist$p.value, "fdr")
+    edgelist             <- edgelist[edgelist$fdr.q.value < FDR.cutoff, ]
+    edgelist             <- dplyr::select(edgelist, c("row", "col", "rho", "p.value", "fdr.q.value"))
+    rownames(edgelist)   <- NULL
+    edgelist             <- edgelist[order(edgelist$rho, decreasing = T), ]
+    
+    if(!is.signed){
+      edgelist$rho <- abs(edgelist$rho)
+    }
+    
+    if(output.corTable){
+      if(!is.null(saveto)){
+        write.table(edgelist, file = paste(saveto, "Data_Correlation.txt", sep = "/"), sep = "\t", row.names = F, col.names = T, quote = F)
+      } else{
+        write.table(edgelist, file = "Data_Correlation.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+      }
+    }
+    
+  } else{
+    
+    # cat("Notice: is.signed parameter not applied, returning absolute value correlations...\n")
+    
+    nc        <- ncol(datExpr)
+    perm.ind  <- lapply(1:doPerm, function(i){
+      set.seed(i)
+      sample(1:nc, nc)
+    })
+    
+    # Compute observed correlation
+    obs_corr <- cor(t(datExpr))
+    obs_corr[lower.tri(obs_corr)] <- NA
+    obs_corr <- type.convert(reshape2::melt(obs_corr), as.is = T)
+    obs_corr <- obs_corr[!is.na(obs_corr$value), ]
+    
+    # Bootstrap
+    boot_corrs <- parallel::mclapply(mc.cores = num.cores, X = perm.ind, FUN = function(x){
+      out <- cor(t(datExpr), t(datExpr[, x]), method = method, use = use.obs)
+      # Note: the upper.tri section correspond to the correlation with the real gene vector (row name) and the shuffled gene vector (column name)
+      out[lower.tri(out)] <- NA
+      out <- type.convert(reshape2::melt(out), as.is = T)
+      out <- out[!is.na(out$value), ]
+      out
+    })
+    # double-check that the dimnames of the data.frames are identical
+    tmp.df <- do.call(cbind, lapply(boot_corrs, function(x) x$Var1))
+    stopifnot(all(apply(tmp.df, 1, function(x) length(unique(x)) == 1)))
+    tmp.df <- do.call(cbind, lapply(boot_corrs, function(x) x$Var2))
+    stopifnot(all(apply(tmp.df, 1, function(x) length(unique(x)) == 1)))
+    stopifnot(all(boot_corrs[[1]]$Var1 == obs_corr$Var1))
+    stopifnot(all(boot_corrs[[1]]$Var2 == obs_corr$Var2))
+    
+    boot_corrs[2:length(boot_corrs)] <- lapply(boot_corrs[2:length(boot_corrs)], function(x) x[, -c(1:2), drop = F])
+    boot_corrs                       <- do.call(cbind, boot_corrs)
+
+    
+    # # Compute p-value based on the alternative hypothesis
+    # if(alternative == "two.sided") {
+    #   p_value <- (sum(abs(boot_corrs) >= abs(obs_corr)) + 1) / (n_boot + 1)
+    # } else if (alternative == "less") {
+    #   p_value <- (sum(boot_corrs <= obs_corr) + 1) / (n_boot + 1)
+    # } else if (alternative == "greater") {
+    #   p_value <- (sum(boot_corrs >= obs_corr) + 1) / (n_boot + 1)
+    # } else {
+    #   stop("Invalid alternative hypothesis. Choose from 'two.sided', 'less', or 'greater'")
+    # }
+    
+    # add index to make sure that mclapply doesn't switch the initial row orders in any operative system
+    boot_corrs <- cbind(idx = 1:nrow(boot_corrs), boot_corrs)
+    pVal_df    <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(boot_corrs), FUN = function(x){
+      # x <- 1
+      # + 1 to the numerator:   ensures that even if the observed correlation is not present in the bootstrapped samples, it still receives a non-zero probability, avoiding a p-value of 0. 
+      # + 1 to the denominator: ensures that the p-value remains within the range [0, 1], even when the observed statistic is extreme.
+      data.frame(idx = boot_corrs$idx[x], p.value = (sum(abs(boot_corrs[x, -c(1:3), drop = F]) >= abs(obs_corr$value[x])) + 1) / (doPerm + 1))
+    })
+    pVal_df <- as.data.frame(data.table::rbindlist(pVal_df))
+    pVal_df <- pVal_df[match(boot_corrs$idx, pVal_df$idx), ]
+    stopifnot(identical(pVal_df$idx, boot_corrs$idx))
+    pVal_range <- base::range(pVal_df$p.value)
+    stopifnot(pVal_range[1] >= 0 & pVal_range[2] <= 1)
+    
+    boot_corrs$p.value <- pVal_df$p.value
+    boot_corrs$rho     <- obs_corr$value
+    
+    # format edgelist
+    edgelist                <- dplyr::select(boot_corrs, c("Var1", "Var2", "rho", "p.value"))
+    edgelist                <- edgelist[edgelist$Var1 != edgelist$Var2, ]
+    edgelist$fdr.q.value    <- p.adjust(edgelist$p.value, "fdr")
+    colnames(edgelist)[1:2] <- c("row", "col")
+    edgelist                <- edgelist[edgelist$fdr.q.value < FDR.cutoff, ]
+    rownames(edgelist)      <- NULL
+    edgelist                <- edgelist[order(edgelist$rho, decreasing = T), ]
+    
+    if(!is.signed){
+      edgelist$rho <- abs(edgelist$rho)
+    }
+    
+    # format boot_corrs
+    boot_corrs <- boot_corrs[, !(colnames(boot_corrs) %in% c("idx", "p.value", "rho"))]
+    colnames(boot_corrs)[grepl("value", colnames(boot_corrs))] <- paste0("rho.perm", 1:sum(grepl("value", colnames(boot_corrs))))
+    colnames(boot_corrs)[1:2] <- c("row", "col")
+    boot_corrs                <- boot_corrs[boot_corrs$row != boot_corrs$col, ]
+    
+    if (output.permFDR){
+      if (!is.null(saveto)){
+        write.table(boot_corrs, file = paste(saveto, "correlation_FDR_table.txt", sep = "/"), sep = "\t", row.names = F, col.names = T, quote = F)
+      } else{
+        write.table(boot_corrs, file = "correlation_FDR_table.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+      }
+    }
+    
+    if (output.corTable){
+      cat("- outputting correlation results...\n");
+      if (!is.null(saveto)){
+        write.table(edgelist, file = paste(saveto,"Data_Correlation.txt", sep = "/"), sep = "\t", row.names = F, col.names = T, quote = F)
+      }else{
+        write.table(edgelist, file = "Data_Correlation.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+      }
+    }
+  }
+  
+  return(edgelist)
+}
+
+
 ##########################

@@ -1,5 +1,6 @@
 useDynLib(MEGENA,.registration = TRUE)
 exportPattern("^calculate.rho.signed",
+				"^calculate.correlation_new",
 				"^compute.PFN.par",
 				"^calculate.PFN",
 				"^datExpr",

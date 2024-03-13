@@ -1,7 +1,7 @@
 # MEGENA
 Multiscale embedded gene co-expression network analysis 
 
-This is a routine MEGENA pipeline description encompassing from data correlation analysis to module plotting, and is based on version 1.3.6 <https://CRAN.R-project.org/package=MEGENA>.Please cite the paper below when MEGENA is applied as part of your analysis: 
+This is a routine MEGENA pipeline description encompassing from data correlation analysis to module plotting, and is based on version 1.3.6 <https://CRAN.R-project.org/package=MEGENA>. The code was adapted by Giacomo von Alvensleben to fix some issues in the computation of signed correlations and to improve performances in terms of speed. Please cite the paper below when MEGENA is applied as part of your analysis: 
 
 Song W.-M., Zhang B. (2015) Multiscale Embedded Gene Co-expression Network Analysis. PLoS Comput Biol 11(11): e1004574. doi: 10.1371/journal.pcbi.1004574.
 
@@ -11,8 +11,6 @@ Song W.-M., Di Matteo T.and Aste T., Building Complex Networks with Platonic Sol
 
 For installation for developmental github version: 
 
-library(devtools);
-
-install_github("songw01/MEGENA");
+remotes::install_github("vonalven/MEGENA");
 
 
