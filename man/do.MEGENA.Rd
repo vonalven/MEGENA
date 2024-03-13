@@ -42,18 +42,25 @@ do.MEGENA(g,
 Performs MCA and MHA by taking PFN as input. Returns a list object containing clustering outputs, hub analysis outputs, and node summary table. 
 
 Recommended d.func (see explanations in the next paragraph):
-> for unsigned correlation: \code{d.func = function(x) 1-x}
-> for signed correlation: \code{d.func = function(x) 1-abs(x)}
+\itemize{
+    \item (1) > for unsigned correlation: \code{d.func = function(x) 1-x}
+    \item (2) > for signed correlation: \code{d.func = function(x) 1-abs(x)}
+  }
 
 As explained in the reference publication, the MCA algorithm incorporates three distinct criteria to identify locally coherent clusters while maintaining a globally optimal partition:
-(1) First, shortest path distances (SPD) are utilized to optimize within-cluster compactness.
-(2) Second, local path index (LPI) is used to optimize local clustering structure. The LPI is a measure of the importance of nodes in a network, based on the number of walks of length 3 between pairs of nodes. These paths represent local connectivity patterns within the network.
-(3) Third, overall modularity (Q) is employed to identify optimal partition.
+\enumerate{
+    \item (1) First, shortest path distances (SPD) are utilized to optimize within-cluster compactness.
+    \item (2) Second, local path index (LPI) is used to optimize local clustering structure. The LPI is a measure of the importance of nodes in a network, based on the number of walks of length 3 between pairs of nodes. These paths represent local connectivity patterns within the network.
+    \item (3) Third, overall modularity (Q) is employed to identify optimal partition.
+  }
+
 The edges weight (= correlation values) are used to compute SPDs for each pairwise combination of the nodes of a sub-network defined by connected vertexes (significant gene-gene correlation pairs), resulting in a symmetric matrix of SPD. The shortest path between two vertices in a graph is the path with the minimum sum of edge weights connecting them.
 To compute meaningful SPDs, a measure of distance is used instead of simply the edges weight (= gene-gene correlation). The default d.func distance function is d = 1 - x, where x is an edge weight. By this way, if 2 genes are highly correlated (rho ~1), d = 1 - ~1 = ~0 and the distance is minimal. 
 When using signed correlations, the default distance function is not appropriate anymore. in fact, if we have some edges with negative correlation, using d = 1 - x would produce distances larger than one, inflating the increase of SPD between 2 genes (computed as sum of edge distance metrics).
 Let's imagine we have an edge with correlation -0.9. In this case d = 1 - (-0.9) = 1.9, indicating very far away genes. By using d = 1 - abs(x), the problem is solved: d = 1 - abs(-0.9) = 0.1, making those 2 genes very close and resulting in a correct SBD not deflating the compactness of sub-networks. 
+
 Note: the edges weight are only used in this SPD-computation step, we should therefore not worry in other parts of the code about the sign of the correlation. 
+
 Note: since the SPD is optimized and not for example the concordance of sub-network correlation sign, we can have modules with co-positively and negatively correlated genes. This simply means that those genes are very correlated between them, independently on the directionality of the correlation.
 }
 \value{
