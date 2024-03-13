@@ -43,15 +43,15 @@ Performs MCA and MHA by taking PFN as input. Returns a list object containing cl
 
 Recommended d.func (see explanations in the next paragraph):
 \itemize{
-    \item (1) > for unsigned correlation: \code{d.func = function(x) 1-x}
-    \item (2) > for signed correlation: \code{d.func = function(x) 1-abs(x)}
+    \item > for unsigned correlation: \code{d.func = function(x) 1-x}
+    \item > for signed correlation: \code{d.func = function(x) 1-abs(x)}
   }
 
 As explained in the reference publication, the MCA algorithm incorporates three distinct criteria to identify locally coherent clusters while maintaining a globally optimal partition:
 \enumerate{
-    \item (1) First, shortest path distances (SPD) are utilized to optimize within-cluster compactness.
-    \item (2) Second, local path index (LPI) is used to optimize local clustering structure. The LPI is a measure of the importance of nodes in a network, based on the number of walks of length 3 between pairs of nodes. These paths represent local connectivity patterns within the network.
-    \item (3) Third, overall modularity (Q) is employed to identify optimal partition.
+    \item First, shortest path distances (SPD) are utilized to optimize within-cluster compactness.
+    \item Second, local path index (LPI) is used to optimize local clustering structure. The LPI is a measure of the importance of nodes in a network, based on the number of walks of length 3 between pairs of nodes. These paths represent local connectivity patterns within the network.
+    \item Third, overall modularity (Q) is employed to identify optimal partition.
   }
 
 The edges weight (= correlation values) are used to compute SPDs for each pairwise combination of the nodes of a sub-network defined by connected vertexes (significant gene-gene correlation pairs), resulting in a symmetric matrix of SPD. The shortest path between two vertices in a graph is the path with the minimum sum of edge weights connecting them.
