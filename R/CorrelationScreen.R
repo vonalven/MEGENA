@@ -363,7 +363,6 @@ calculate.correlation_new <- function(datExpr,
                                       saveto          = NULL){
   
   
-  
   # Input
   # datExpr = expression matrix (row = probe,column = sample)
   # doPerm = number of permutations
@@ -376,6 +375,8 @@ calculate.correlation_new <- function(datExpr,
   
   if(doPerm == 0){
     
+    cat("Computing correlation and pValue...\n")
+    # Use fast correlation and pValue implementation (the difference with the normal correlation is in the 1e-15/1e-16 order of magnitude)
     cor.output                             <- WGCNA::corAndPvalue(x = t(datExpr), use = use.obs, alternative = "two.sided", method = method)
     cor.df                                 <- cor.output$cor
     cor.df[upper.tri(cor.df, diag = T)]    <- NA
@@ -388,6 +389,7 @@ calculate.correlation_new <- function(datExpr,
     # match rows instead of merging - faster
     stopifnot(identical(cor.df$row, pval.df$row) & identical(cor.df$col, pval.df$col))
     
+    cat("Formatting objects...\n") 
     edgelist             <- type.convert(as.data.frame(cbind(cor.df, pval.df[, -c(1:2), drop = F])), as.is = T)
     edgelist             <- edgelist[!is.na(edgelist$rho), ]
     # edgelist             <- edgelist[edgelist$row != edgelist$col, ]
@@ -419,22 +421,31 @@ calculate.correlation_new <- function(datExpr,
       sample(1:nc, nc)
     })
     
-    # Compute observed correlation
-    obs_corr <- cor(t(datExpr))
-    obs_corr[lower.tri(obs_corr)] <- NA
-    obs_corr <- type.convert(reshape2::melt(obs_corr), as.is = T)
-    obs_corr <- obs_corr[!is.na(obs_corr$value), ]
-    
     # Bootstrap
+    # Use fast correlation implementation (the difference with the normal correlation is in the 1e-15/1e-16 order of magnitude)
+    cat("Computing bootstrap correlation...\n")
     boot_corrs <- parallel::mclapply(mc.cores = num.cores, X = perm.ind, FUN = function(x){
-      out <- cor(t(datExpr), t(datExpr[, x]), method = method, use = use.obs)
+      out                 <- WGCNA::cor(t(datExpr), t(datExpr[, x]), use = use.obs, method = method)
       # Note: the upper.tri section correspond to the correlation with the real gene vector (row name) and the shuffled gene vector (column name)
       out[lower.tri(out)] <- NA
-      out <- type.convert(reshape2::melt(out), as.is = T)
-      out <- out[!is.na(out$value), ]
+      out                 <- reshape2::melt(out, na.rm = T)
+      out$Var1            <- as.character(out$Var1)
+      out$Var2            <- as.character(out$Var2)
       out
     })
+    
+    
+    # Compute observed correlation
+    # Use fast correlation implementation (the difference with the normal correlation is in the 1e-15/1e-16 order of magnitude)
+    cat("Computing observed correlation...\n")
+    obs_corr                      <- WGCNA::cor(t(datExpr), use = use.obs, method = method)
+    obs_corr[lower.tri(obs_corr)] <- NA
+    obs_corr                      <- reshape2::melt(obs_corr, na.rm = T)
+    obs_corr$Var1                 <- as.character(obs_corr$Var1)
+    obs_corr$Var2                 <- as.character(obs_corr$Var2)
+    
     # double-check that the dimnames of the data.frames are identical
+    cat("Correlation outputs QC...\n")
     tmp.df  <- do.call(cbind, lapply(boot_corrs, function(x) x$Var1))
     tmpLogi <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(tmp.df), FUN = function(x) length(unique(tmp.df[x, ])) == 1)
     stopifnot(all(unlist(tmpLogi)))
@@ -462,6 +473,7 @@ calculate.correlation_new <- function(datExpr,
     # }
     
     # add index to make sure that mclapply doesn't switch the initial row orders in any operative system
+    cat("Computing emprirical pValues...\n")
     boot_corrs <- cbind(idx = 1:nrow(boot_corrs), boot_corrs)
     pVal_df    <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(boot_corrs), FUN = function(x){
       # x <- 1
@@ -479,6 +491,7 @@ calculate.correlation_new <- function(datExpr,
     boot_corrs$rho     <- obs_corr$value
     
     # format edgelist
+    cat("Formatting objects...\n")
     edgelist                <- dplyr::select(boot_corrs, c("Var1", "Var2", "rho", "p.value"))
     edgelist                <- edgelist[edgelist$Var1 != edgelist$Var2, ]
     # edgelist$fdr.q.value    <- p.adjust(edgelist$p.value, "fdr")
