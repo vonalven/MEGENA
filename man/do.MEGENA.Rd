@@ -43,8 +43,8 @@ Performs MCA and MHA by taking PFN as input. Returns a list object containing cl
 
 Recommended d.func (see explanations in the next paragraph):
 \itemize{
-    \item > for unsigned correlation: \code{d.func = function(x) 1-x}
-    \item > for signed correlation: \code{d.func = function(x) 1-abs(x)}
+    \item for unsigned correlation: \code{d.func = function(x) 1-x}
+    \item for signed correlation: \code{d.func = function(x) 1-abs(x)}
   }
 
 As explained in the reference publication, the MCA algorithm incorporates three distinct criteria to identify locally coherent clusters while maintaining a globally optimal partition:
