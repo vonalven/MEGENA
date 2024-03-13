@@ -353,23 +353,22 @@ calculate.correlation <- function(datExpr,doPerm = 100,doPar = FALSE,num.cores =
 
 calculate.correlation_new <- function(datExpr,
                                       doPerm          = 100,
-                                      doPar           = FALSE,
                                       num.cores       = 8,
                                       method          = "pearson",
                                       use.obs         = "na.or.complete",
                                       FDR.cutoff      = 0.05,
-                                      n.increment     = 100,
                                       is.signed       = FALSE,
                                       output.permFDR  = TRUE,
                                       output.corTable = TRUE,
                                       saveto          = NULL){
+  
+  
   
   # Input
   # datExpr = expression matrix (row = probe,column = sample)
   # doPerm = number of permutations
   # num.cores = number of cores to call when parallel computing 
   # FDR.cutoff = FDR cut-off
-  # n.increment = number of increments to segment (rho_min,rho_max).
   # is.signed = FALSE (unsigned correlation), TRUE (signed correlation)
   # output.permFDR = TRUE (output permutation indices into .txt file)
   # output.corTable = TRUE (output final correlation into .txt file)
@@ -436,12 +435,16 @@ calculate.correlation_new <- function(datExpr,
       out
     })
     # double-check that the dimnames of the data.frames are identical
-    tmp.df <- do.call(cbind, lapply(boot_corrs, function(x) x$Var1))
-    stopifnot(all(apply(tmp.df, 1, function(x) length(unique(x)) == 1)))
-    tmp.df <- do.call(cbind, lapply(boot_corrs, function(x) x$Var2))
-    stopifnot(all(apply(tmp.df, 1, function(x) length(unique(x)) == 1)))
+    tmp.df  <- do.call(cbind, lapply(boot_corrs, function(x) x$Var1))
+    tmpLogi <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(tmp.df), FUN = function(x) length(unique(tmp.df[x, ])) == 1)
+    stopifnot(all(unlist(tmpLogi)))
+    tmp.df  <- do.call(cbind, lapply(boot_corrs, function(x) x$Var2))
+    tmpLogi <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(tmp.df), FUN = function(x) length(unique(tmp.df[x, ])) == 1)
+    stopifnot(all(unlist(tmpLogi)))
     stopifnot(all(boot_corrs[[1]]$Var1 == obs_corr$Var1))
     stopifnot(all(boot_corrs[[1]]$Var2 == obs_corr$Var2))
+    remove(tmp.df)
+    
     
     boot_corrs[2:length(boot_corrs)] <- lapply(boot_corrs[2:length(boot_corrs)], function(x) x[, -c(1:2), drop = F])
     boot_corrs                       <- do.call(cbind, boot_corrs)
@@ -478,7 +481,8 @@ calculate.correlation_new <- function(datExpr,
     # format edgelist
     edgelist                <- dplyr::select(boot_corrs, c("Var1", "Var2", "rho", "p.value"))
     edgelist                <- edgelist[edgelist$Var1 != edgelist$Var2, ]
-    edgelist$fdr.q.value    <- p.adjust(edgelist$p.value, "fdr")
+    # edgelist$fdr.q.value    <- p.adjust(edgelist$p.value, "fdr")
+    edgelist$fdr.q.value    <- edgelist$p.value
     colnames(edgelist)[1:2] <- c("row", "col")
     edgelist                <- edgelist[edgelist$fdr.q.value < FDR.cutoff, ]
     rownames(edgelist)      <- NULL
