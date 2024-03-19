@@ -495,7 +495,7 @@ calculate.correlation_new <- function(datExpr,
       if(direction %in% c("absolute", "positive")){
         count.obs_new(random.cor, rho.thresh, "ascending")
       } else if(direction == "negative"){
-        out <- count.obs_new(random.cor, rho.thresh, "descending")
+        count.obs_new(random.cor, rho.thresh, "descending")
       }
     })
     
