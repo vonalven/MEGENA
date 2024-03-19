@@ -593,8 +593,6 @@ calculate.correlation_new <- function(datExpr,
       edgelist                 <- edgelist[order(edgelist$rho, decreasing = T), ]
       
       
-    list(signif.ijw = ijw,FDR = FDR.table)
-      
     } else if(direction == "negative"){
       
       rho.cutoff <- max(FDR.table$cut.off[FDR.table$FDR < FDR.cutoff])
