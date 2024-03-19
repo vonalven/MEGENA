@@ -349,35 +349,59 @@ calculate.correlation <- function(datExpr,doPerm = 100,doPar = FALSE,num.cores =
  return(edgelist)
 }
 
-
+count.obs_new <- function(rho_vec, 
+                          rho_thresh_vec = seq(from = 0, to = 1, length.out = 101), 
+                          direction      = "ascending"){
+  
+  if(direction == "ascending"){
+    nb_obs_above <- unlist(lapply(rho_thresh_vec, function(x) sum(rho_vec > x)))
+  } else if(direction == "descending"){
+    nb_obs_above <- unlist(lapply(rho_thresh_vec, function(x) sum(rho_vec < x)))
+  }
+  out.df      <- data.frame(rho.cutoff   = rho_thresh_vec,
+                            nb.obs.above = nb_obs_above,
+                            nb.obs.total = length(rho_vec),
+                            stringsAsFactors = F)
+  
+  out.df
+  
+}
 
 calculate.correlation_new <- function(datExpr,
-                                      doPerm          = 100,
-                                      num.cores       = 8,
-                                      method          = "pearson",
-                                      use.obs         = "na.or.complete",
-                                      FDR.cutoff      = 0.05,
-                                      is.signed       = FALSE,
-                                      output.permFDR  = TRUE,
-                                      output.corTable = TRUE,
-                                      saveto          = NULL){
+                                      doPerm            = 100,
+                                      num.cores         = 8,
+                                      method            = "pearson",
+                                      use.obs           = "pairwise.complete.obs",
+                                      FDR.cutoff        = 0.05,
+                                      direction         = "absolute",
+                                      rho.thresh.step   = 0.0025,
+                                      output.permFDR    = TRUE,
+                                      output.corTable   = TRUE,
+                                      saveto            = NULL){
   
   
-  # Input
-  # datExpr = expression matrix (row = probe,column = sample)
-  # doPerm = number of permutations
-  # num.cores = number of cores to call when parallel computing 
-  # FDR.cutoff = FDR cut-off
-  # is.signed = FALSE (unsigned correlation), TRUE (signed correlation)
-  # output.permFDR = TRUE (output permutation indices into .txt file)
-  # output.corTable = TRUE (output final correlation into .txt file)
-  # saveto = designated save folder
+  # Notes: using direction = positive or negative corresponds to a one-side test (alternative = greater or less respectively)
+  
+  if(!(direction %in% c("absolute", "positive", "negative"))){
+    stop(">> direction must be one of the following: absolute, positive, or negative.")
+  }
+  if(!is.null(saveto) & !dir.exists(saveto)){
+    dir.create(saveto, recursive = T)
+  }
   
   if(doPerm == 0){
     
     cat("Computing correlation and pValue...\n")
+
     # Use fast correlation and pValue implementation (the difference with the normal correlation is in the 1e-15/1e-16 order of magnitude)
-    cor.output                             <- WGCNA::corAndPvalue(x = t(datExpr), use = use.obs, alternative = "two.sided", method = method)
+    if(direction == "absolute"){
+      cor.output <- WGCNA::corAndPvalue(x = t(datExpr), use = use.obs, alternative = "two.sided", method = method)
+    } else if(direction == "positive"){
+      cor.output <- WGCNA::corAndPvalue(x = t(datExpr), use = use.obs, alternative = "greater", method = method)
+    } else if(direction == "negative"){
+      cor.output <- WGCNA::corAndPvalue(x = t(datExpr), use = use.obs, alternative = "less", method = method)
+    }
+    
     cor.df                                 <- cor.output$cor
     cor.df[upper.tri(cor.df, diag = T)]    <- NA
     cor.df                                 <- reshape2::melt(cor.df)
@@ -397,11 +421,17 @@ calculate.correlation_new <- function(datExpr,
     edgelist             <- edgelist[edgelist$fdr.q.value < FDR.cutoff, ]
     edgelist             <- dplyr::select(edgelist, c("row", "col", "rho", "p.value", "fdr.q.value"))
     rownames(edgelist)   <- NULL
-    edgelist             <- edgelist[order(edgelist$rho, decreasing = T), ]
     
-    if(!is.signed){
+    if(direction == "absolute"){
       edgelist$rho <- abs(edgelist$rho)
     }
+    
+    if(direction %in% c("absolute", "positive")){
+      edgelist <- edgelist[order(edgelist$rho, decreasing = T), ]
+    } else if(direction == "negative"){
+      edgelist <- edgelist[order(edgelist$rho, decreasing = F), ]
+    }
+    FDR.table <- NULL
     
     if(output.corTable){
       if(!is.null(saveto)){
@@ -413,8 +443,31 @@ calculate.correlation_new <- function(datExpr,
     
   } else{
     
-    # cat("Notice: is.signed parameter not applied, returning absolute value correlations...\n")
+    # Notes:
+    # We operate here under the assumption that 
+    # (1) the observed "real" correlation are a combination of False Positive 
+    #     (FP) and True Positive (FP), i.e. FP + TP
+    #     to optimize computations we split this computations in N permutations
+    # (2) the permuted correlations are FP
+    # (3) combining this, we compute the global False Discovery Rate for each 
+    #     correlation threhsold in rho.thresh as:
+    #     FDR = FP / (FP + TP)
+    #     Ideally, a similar permutation approach could be used to compute an 
+    #     empirical pValue for each edge (gene-gene correlation pair). This was
+    #     the original adapted implementation here, available in a previous 
+    #     commit of this forked MEGENA branch, but it is too computationally
+    #     expensive.
     
+    # build correlation cutoffs vector
+    # round rho.thresh.step to divide the range [0, 1] into equal bins
+    rho.thresh.step <- 1/floor(1/rho.thresh.step)
+    if(direction == "absolute"){
+      rho.thresh <- seq(from = 0, to = 1, by = rho.thresh.step)
+    } else{
+      rho.thresh <- seq(from = -1, to = 1, by = rho.thresh.step)
+    }
+    
+    # Set random seed inside lapply to guarantee maximum reproducibility
     nc        <- ncol(datExpr)
     perm.ind  <- lapply(1:doPerm, function(i){
       set.seed(i)
@@ -423,99 +476,146 @@ calculate.correlation_new <- function(datExpr,
     
     # Bootstrap
     # Use fast correlation implementation (the difference with the normal correlation is in the 1e-15/1e-16 order of magnitude)
-    cat("Computing bootstrap correlation...\n")
-    boot_corrs <- parallel::mclapply(mc.cores = num.cores, X = perm.ind, FUN = function(x){
-      out                 <- WGCNA::cor(t(datExpr), t(datExpr[, x]), use = use.obs, method = method)
+    # Note: count false discovery numbers without computing a rate since the total number of observations is always the same
+    cat("Computing bootstrap correlation and counting number of observations above correlation thresholds (assumed to be FP - using shuffled data, i.e. FP)...\n")
+    perm.corr.counts <- parallel::mclapply(mc.cores = num.cores, X = perm.ind, FUN = function(x){
+      # x <- perm.ind[[1]]
+      
+      if(direction == "absolute"){
+        random.cor <- abs(WGCNA::cor(t(datExpr), t(datExpr[, x]), use = use.obs, method = method))
+      } else{
+        random.cor <- WGCNA::cor(t(datExpr), t(datExpr[, x]), use = use.obs, method = method)
+      }
+      
       # Note: the upper.tri section correspond to the correlation with the real gene vector (row name) and the shuffled gene vector (column name)
-      out[lower.tri(out)] <- NA
-      out                 <- reshape2::melt(out, na.rm = T)
-      out$Var1            <- as.character(out$Var1)
-      out$Var2            <- as.character(out$Var2)
-      out
+      random.cor <- as.vector(random.cor[upper.tri(random.cor)])
+      
+      if(direction %in% c("absolute", "positive")){
+        count.obs_new(random.cor, rho.thresh, "ascending")
+      } else if(direction == "negative"){
+        out <- count.obs_new(random.cor, rho.thresh, "descending")
+      }
     })
-    
     
     # Compute observed correlation
     # Use fast correlation implementation (the difference with the normal correlation is in the 1e-15/1e-16 order of magnitude)
-    cat("Computing observed correlation...\n")
-    obs_corr                      <- WGCNA::cor(t(datExpr), use = use.obs, method = method)
-    obs_corr[lower.tri(obs_corr)] <- NA
-    obs_corr                      <- reshape2::melt(obs_corr, na.rm = T)
-    obs_corr$Var1                 <- as.character(obs_corr$Var1)
-    obs_corr$Var2                 <- as.character(obs_corr$Var2)
-    
-    # double-check that the dimnames of the data.frames are identical
-    cat("Correlation outputs QC...\n")
-    tmp.df  <- do.call(cbind, lapply(boot_corrs, function(x) x$Var1))
-    tmpLogi <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(tmp.df), FUN = function(x) length(unique(tmp.df[x, ])) == 1)
-    stopifnot(all(unlist(tmpLogi)))
-    tmp.df  <- do.call(cbind, lapply(boot_corrs, function(x) x$Var2))
-    tmpLogi <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(tmp.df), FUN = function(x) length(unique(tmp.df[x, ])) == 1)
-    stopifnot(all(unlist(tmpLogi)))
-    stopifnot(all(boot_corrs[[1]]$Var1 == obs_corr$Var1))
-    stopifnot(all(boot_corrs[[1]]$Var2 == obs_corr$Var2))
-    remove(tmp.df)
-    
-    
-    boot_corrs[2:length(boot_corrs)] <- lapply(boot_corrs[2:length(boot_corrs)], function(x) x[, -c(1:2), drop = F])
-    boot_corrs                       <- do.call(cbind, boot_corrs)
-
-    
-    # # Compute p-value based on the alternative hypothesis
-    # if(alternative == "two.sided") {
-    #   p_value <- (sum(abs(boot_corrs) >= abs(obs_corr)) + 1) / (n_boot + 1)
-    # } else if (alternative == "less") {
-    #   p_value <- (sum(boot_corrs <= obs_corr) + 1) / (n_boot + 1)
-    # } else if (alternative == "greater") {
-    #   p_value <- (sum(boot_corrs >= obs_corr) + 1) / (n_boot + 1)
-    # } else {
-    #   stop("Invalid alternative hypothesis. Choose from 'two.sided', 'less', or 'greater'")
-    # }
-    
-    # add index to make sure that mclapply doesn't switch the initial row orders in any operative system
-    cat("Computing emprirical pValues...\n")
-    boot_corrs <- cbind(idx = 1:nrow(boot_corrs), boot_corrs)
-    pVal_df    <- parallel::mclapply(mc.cores = num.cores, X = 1:nrow(boot_corrs), FUN = function(x){
-      # x <- 1
-      # + 1 to the numerator:   ensures that even if the observed correlation is not present in the bootstrapped samples, it still receives a non-zero probability, avoiding a p-value of 0. 
-      # + 1 to the denominator: ensures that the p-value remains within the range [0, 1], even when the observed statistic is extreme.
-      data.frame(idx = boot_corrs$idx[x], p.value = (sum(abs(boot_corrs[x, -c(1:3), drop = F]) >= abs(obs_corr$value[x])) + 1) / (doPerm + 1))
-    })
-    pVal_df <- as.data.frame(data.table::rbindlist(pVal_df))
-    pVal_df <- pVal_df[match(boot_corrs$idx, pVal_df$idx), ]
-    stopifnot(identical(pVal_df$idx, boot_corrs$idx))
-    pVal_range <- base::range(pVal_df$p.value)
-    stopifnot(pVal_range[1] >= 0 & pVal_range[2] <= 1)
-    
-    boot_corrs$p.value <- pVal_df$p.value
-    boot_corrs$rho     <- obs_corr$value
-    
-    # format edgelist
-    cat("Formatting objects...\n")
-    edgelist                <- dplyr::select(boot_corrs, c("Var1", "Var2", "rho", "p.value"))
-    edgelist                <- edgelist[edgelist$Var1 != edgelist$Var2, ]
-    # edgelist$fdr.q.value    <- p.adjust(edgelist$p.value, "fdr")
-    edgelist$fdr.q.value    <- edgelist$p.value
-    colnames(edgelist)[1:2] <- c("row", "col")
-    edgelist                <- edgelist[edgelist$fdr.q.value < FDR.cutoff, ]
-    rownames(edgelist)      <- NULL
-    edgelist                <- edgelist[order(edgelist$rho, decreasing = T), ]
-    
-    if(!is.signed){
-      edgelist$rho <- abs(edgelist$rho)
+    cat("Computing observed correlation and counting number of observations above correlation thresholds (assumed to be total positive observations, i.e. FP + TN)...\n")
+    if(direction == "absolute"){
+      obs_corr <- abs(WGCNA::cor(t(datExpr), use = use.obs, method = method))
+    } else{
+      obs_corr <- WGCNA::cor(t(datExpr), use = use.obs, method = method)
     }
     
-    # format boot_corrs
-    boot_corrs <- boot_corrs[, !(colnames(boot_corrs) %in% c("idx", "p.value", "rho"))]
-    colnames(boot_corrs)[grepl("value", colnames(boot_corrs))] <- paste0("rho.perm", 1:sum(grepl("value", colnames(boot_corrs))))
-    colnames(boot_corrs)[1:2] <- c("row", "col")
-    boot_corrs                <- boot_corrs[boot_corrs$row != boot_corrs$col, ]
+    obs_corr.vec  <- as.vector(obs_corr[upper.tri(obs_corr)])
+    
+    if(direction %in% c("absolute", "positive")){
+      obs.counts.df <- count.obs_new(obs_corr.vec, rho.thresh, "ascending")
+    } else if(direction == "negative"){
+      obs.counts.df <- count.obs_new(obs_corr.vec, rho.thresh, "descending")
+    }
+    
+    cat("Computing FDR and subsetting edges...\n")
+    
+    # Compute false positive (FP) rate
+    count.fp.tot  <- apply(do.call(cbind, lapply(perm.corr.counts, function(x) x[, 2])), 1, sum)
+    count.obs.tot <- apply(do.call(cbind, lapply(perm.corr.counts, function(x) x[, 3])), 1, sum)
+    fpr.vec       <- count.fp.tot / count.obs.tot
+    
+    if(direction %in% c("absolute", "positive")){
+      fpr.vec[1] <- 1
+    } else if(direction == "negative"){
+      fpr.vec[length(fpr.vec)] <- 1
+    }
+    
+    
+    # Compute true positive + false positive (TP + FP) rate
+    tp.fp.r.vec   <- obs.counts.df$nb.obs.above / obs.counts.df$nb.obs.total
+    
+    # Compute empirical FDR pValue
+    fdr.vec                   <- fpr.vec / tp.fp.r.vec
+    fdr.vec[fpr.vec == 0]     <- 0
+    fdr.vec[tp.fp.r.vec == 0] <- 0
+    
+    # adjust monotonicity and fdr range
+    fdr.vec.monotonic                         <- fdr.vec
+    fdr.vec.monotonic[fdr.vec.monotonic > 1]  <- 1
+    
+    # apply constraint that higher correlation threshold yields lower FDR than 
+    # lower correlation thresholds (<< if corr increase, FDR decrease >>)
+    if(direction %in% c("absolute", "positive")){
+      
+      mx <- fdr.vec.monotonic[1]
+      for(i in 2:length(fdr.vec.monotonic)){
+        if(fdr.vec.monotonic[i] > mx){
+          fdr.vec.monotonic[i] <- mx 
+        } else{
+          mx <- fdr.vec.monotonic[i]
+        }
+      }
+      
+    } else if(direction == "negative"){
+      
+      mx <- fdr.vec.monotonic[length(fdr.vec.monotonic)]
+      for(i in (length(fdr.vec.monotonic) - 1):1){
+        if(fdr.vec.monotonic[i] > mx){
+          fdr.vec.monotonic[i] <- mx 
+        } else{
+          mx <- fdr.vec.monotonic[i]
+        }
+      }
+      
+    }
+    
+    FDR.table <- data.frame(cut.off       = rho.thresh,
+                            FPR           = fpr.vec,
+                            PR            = tp.fp.r.vec,
+                            FDR           = fdr.vec,
+                            FDR_monotonic = fdr.vec.monotonic)
+    
+    
+    # choose threshold respect to FDR.cutoff
+    if(direction %in% c("absolute", "positive")){
+      
+      rho.cutoff <- min(FDR.table$cut.off[FDR.table$FDR_monotonic < FDR.cutoff])
+      
+      edgelist                 <- obs_corr
+      edgelist[lower.tri(edgelist)] <- NA
+      edgelist                 <- reshape2::melt(edgelist, na.rm = T)
+      edgelist$Var1            <- as.character(edgelist$Var1)
+      edgelist$Var2            <- as.character(edgelist$Var2)
+      edgelist                 <- edgelist[!is.na(edgelist$value), ]
+      edgelist                 <- edgelist[edgelist$Var1 != edgelist$Var2, ]
+      colnames(edgelist)       <- c("row", "col", "rho")
+      edgelist                 <- edgelist[edgelist$rho >= rho.cutoff, ]
+      rownames(edgelist)       <- NULL
+      edgelist                 <- edgelist[order(edgelist$rho, decreasing = T), ]
+      
+      
+    list(signif.ijw = ijw,FDR = FDR.table)
+      
+    } else if(direction == "negative"){
+      
+      rho.cutoff <- max(FDR.table$cut.off[FDR.table$FDR < FDR.cutoff])
+      
+      edgelist                 <- obs_corr
+      edgelist[lower.tri(edgelist)] <- NA
+      edgelist                 <- reshape2::melt(edgelist, na.rm = T)
+      edgelist$Var1            <- as.character(edgelist$Var1)
+      edgelist$Var2            <- as.character(edgelist$Var2)
+      edgelist                 <- edgelist[!is.na(edgelist$value), ]
+      edgelist                 <- edgelist[edgelist$Var1 != edgelist$Var2, ]
+      colnames(edgelist)       <- c("row", "col", "rho")
+      edgelist                 <- edgelist[edgelist$rho <= rho.cutoff, ]
+      rownames(edgelist)       <- NULL
+      edgelist                 <- edgelist[order(edgelist$rho, decreasing = F), ]
+      
+    }
     
     if (output.permFDR){
       if (!is.null(saveto)){
-        write.table(boot_corrs, file = paste(saveto, "correlation_FDR_table.txt", sep = "/"), sep = "\t", row.names = F, col.names = T, quote = F)
+        write.table(FDR.table, file = paste(saveto, "correlation_FDR_table.txt", sep = "/"), sep = "\t", row.names = F, col.names = T, quote = F)
       } else{
-        write.table(boot_corrs, file = "correlation_FDR_table.txt", sep = "\t", row.names = F, col.names = T, quote = F)
+        write.table(FDR.table, file = "correlation_FDR_table.txt", sep = "\t", row.names = F, col.names = T, quote = F)
       }
     }
     
@@ -529,8 +629,8 @@ calculate.correlation_new <- function(datExpr,
     }
   }
   
-  return(edgelist)
+  return(list(signif.ijw = edgelist,
+              FDR        = FDR.table))
 }
-
 
 ##########################
