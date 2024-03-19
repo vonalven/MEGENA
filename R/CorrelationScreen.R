@@ -385,8 +385,10 @@ calculate.correlation_new <- function(datExpr,
   if(!(direction %in% c("absolute", "positive", "negative"))){
     stop(">> direction must be one of the following: absolute, positive, or negative.")
   }
-  if(!is.null(saveto) & !dir.exists(saveto)){
-    dir.create(saveto, recursive = T)
+ if(!is.null(saveto)){
+    if(!dir.exists(saveto)){
+      dir.create(saveto, recursive = T)
+    }
   }
   
   if(doPerm == 0){
