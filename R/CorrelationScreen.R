@@ -451,6 +451,8 @@ calculate.correlation_new <- function(datExpr,
         write.table(edgelist, file = "Data_Correlation.txt", sep = "\t", row.names = F, col.names = T, quote = F)
       }
     }
+
+    remove(cor.output, cor.df, pval.df, tmpLogi.keep)
     
   } else{
     
@@ -636,6 +638,9 @@ calculate.correlation_new <- function(datExpr,
         write.table(edgelist, file = "Data_Correlation.txt", sep = "\t", row.names = F, col.names = T, quote = F)
       }
     }
+
+    remove(rho.thresh, perm.ind, perm.corr.counts, obs_corr, obs_corr.vec, obs.counts.df, count.fp.tot, count.obs.tot, fpr.vec, tp.fp.r.vec, fdr.vec, fdr.vec.monotonic)
+
   }
   
   return(list(signif.ijw = edgelist,
