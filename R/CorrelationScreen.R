@@ -425,7 +425,14 @@ calculate.correlation_new <- function(datExpr,
     pval.df             <- pval.df[tmpLogi.keep, ]
 
     cat("Formatting objects...\n") 
-    edgelist             <- type.convert(as.data.frame(cbind(cor.df, pval.df[, -c(1:2), drop = F])), as.is = T)
+    rownames(cor.df)     <- NULL
+    rownames(pval.df)    <- NULL
+    edgelist             <- as.data.frame(cbind(cor.df, pval.df[, -c(1:2), drop = F]))
+    
+    # convert data-types (remove factors)
+    edgelist$row <- as.character(edgelist$row)
+    edgelist$col <- as.character(edgelist$col)
+
     # edgelist             <- edgelist[!is.na(edgelist$rho), ]
     # edgelist             <- edgelist[edgelist$row != edgelist$col, ]
     # edgelist$fdr.q.value <- p.adjust(edgelist$p.value, "fdr")
