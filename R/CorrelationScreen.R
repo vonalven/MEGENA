@@ -404,6 +404,7 @@ calculate.correlation_new <- function(datExpr,
       cor.output <- WGCNA::corAndPvalue(x = t(datExpr), use = use.obs, alternative = "less", method = method)
     }
     
+    cat("Extracting edges and selecting significant ones...\n")
     cor.df                                 <- cor.output$cor
     cor.df[upper.tri(cor.df, diag = T)]    <- NA
     cor.df                                 <- reshape2::melt(cor.df)
@@ -415,12 +416,20 @@ calculate.correlation_new <- function(datExpr,
     # match rows instead of merging - faster
     stopifnot(identical(cor.df$row, pval.df$row) & identical(cor.df$col, pval.df$col))
     
+    tmpLogi.keep        <- !is.na(cor.df$rho)
+    cor.df              <- cor.df[tmpLogi.keep, ]
+    pval.df             <- pval.df[tmpLogi.keep, ]
+    pval.df$fdr.q.value <- p.adjust(pval.df$p.value, "fdr")
+    tmpLogi.keep        <- pval.df$fdr.q.value < FDR.cutoff
+    cor.df              <- cor.df[tmpLogi.keep, ]
+    pval.df             <- pval.df[tmpLogi.keep, ]
+
     cat("Formatting objects...\n") 
     edgelist             <- type.convert(as.data.frame(cbind(cor.df, pval.df[, -c(1:2), drop = F])), as.is = T)
-    edgelist             <- edgelist[!is.na(edgelist$rho), ]
+    # edgelist             <- edgelist[!is.na(edgelist$rho), ]
     # edgelist             <- edgelist[edgelist$row != edgelist$col, ]
-    edgelist$fdr.q.value <- p.adjust(edgelist$p.value, "fdr")
-    edgelist             <- edgelist[edgelist$fdr.q.value < FDR.cutoff, ]
+    # edgelist$fdr.q.value <- p.adjust(edgelist$p.value, "fdr")
+    # edgelist             <- edgelist[edgelist$fdr.q.value < FDR.cutoff, ]
     edgelist             <- dplyr::select(edgelist, c("row", "col", "rho", "p.value", "fdr.q.value"))
     rownames(edgelist)   <- NULL
     
